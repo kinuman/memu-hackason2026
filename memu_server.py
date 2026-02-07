@@ -4,6 +4,10 @@ import tempfile
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
