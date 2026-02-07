@@ -25,7 +25,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 def generate_gemini_rest(api_key, prompt):
     """Direct REST API call to avoid library issues"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    # Switch to gemini-2.0-flash as 1.5-flash is not available in this environment
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     data = {
         "contents": [{
