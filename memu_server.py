@@ -22,7 +22,13 @@ is_compatible = sys.version_info >= (3, 10)
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        print("✓ Gemini API configured successfully")
+    except Exception as e:
+        print(f"✗ Failed to configure Gemini API: {e}")
+else:
+    print("⚠ GEMINI_API_KEY not found in environment variables")
 
 # Mock MemoryService if memu cannot be imported or as a fallback
 class MockMemoryService:
