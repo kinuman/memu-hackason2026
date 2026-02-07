@@ -194,18 +194,22 @@
             e.preventDefault();
             const text = userInput.value.trim();
             if (!text) return;
+            
+            if (sendBtn.disabled) return; // Prevent double submission
 
             // UI Update
             userInput.value = '';
             userInput.style.height = 'auto';
             appendMessage('user', text);
             appendTyping();
+            
+            // Disable input to prevent rapid-fire spamming (連打対策)
             sendBtn.disabled = true;
+            userInput.disabled = true; 
+            userInput.placeholder = "AIが考え中...";
 
             try {
                 // API Call
-                // Use relative path for production, absolute for local dev if on different port (handled by CORS)
-                // But since we serve static from same origin in production, relative /chat is best.
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -224,10 +228,15 @@
             } catch (error) {
                 console.error('Error:', error);
                 removeTyping();
-                appendMessage('assistant', '申し訳ありません。エラーが発生しました。もう一度お試しください。');
+                appendMessage('assistant', '申し訳ありません。通信エラーが発生しました。少し待ってから再送信してください。');
             } finally {
-                sendBtn.disabled = false;
-                userInput.focus();
+                // Re-enable input after delay to throttle slightly
+                setTimeout(() => {
+                    sendBtn.disabled = false;
+                    userInput.disabled = false;
+                    userInput.placeholder = "メッセージを入力...";
+                    userInput.focus();
+                }, 500); // 0.5s delay
             }
         }
 

@@ -33,8 +33,8 @@ FORGE_API_KEY = os.getenv("BUILT_IN_FORGE_API_KEY") or os.getenv("VITE_FRONTEND_
 
 def generate_gemini_rest(api_key, prompt):
     """Direct REST API call to avoid library issues"""
-    # Using gemini-2.0-flash-lite-001 for better rate limit handling
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={api_key}"
+    # Using gemini-1.5-flash as it is the most stable standard model
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     data = {
         "contents": [{
@@ -53,11 +53,15 @@ def generate_gemini_rest(api_key, prompt):
                 time.sleep(wait_time)
                 continue
             
+            if response.status_code == 403:
+                print(f"Auth Error (403): Key might be invalid or model access restricted.")
+                raise Exception("Authentication Error or Model Access Denied")
+
             response.raise_for_status()
             result = response.json()
             return result['candidates'][0]['content']['parts'][0]['text']
         except Exception as e:
-            print(f"REST API Error: {e}")
+            print(f"REST API Error (Attempt {attempt+1}): {e}")
             if attempt == max_retries - 1:
                 if 'response' in locals() and hasattr(response, 'status_code') and response.status_code != 200:
                      print(f"Response: {response.text}")
