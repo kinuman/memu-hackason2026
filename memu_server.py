@@ -254,6 +254,7 @@ async def chat_endpoint(request: ChatRequest):
     
     # 2. Try Generating Response with Gemini (REST API)
     reply = ""
+    error_detail = ""
     used_model = False
     
     if GEMINI_API_KEY:
@@ -273,41 +274,74 @@ async def chat_endpoint(request: ChatRequest):
                 reply = cached + " (Cached)"
                 used_model = True
             else:
-                # Use direct REST call instead of SDK
-                reply = generate_gemini_rest(GEMINI_API_KEY, prompt)
-                cache_response(prompt, reply)
-                used_model = True
+                # Switching to gemini-2.0-flash for potentially better stability
+                # Direct REST call using v1beta endpoint
+                model_name = "gemini-2.0-flash"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+                headers = {'Content-Type': 'application/json'}
+                data = {
+                    "contents": [{
+                        "parts": [{"text": prompt}]
+                    }]
+                }
+                
+                import time
+                max_retries = 3
+                last_error = ""
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.post(url, headers=headers, json=data, timeout=12)
+                        if response.status_code == 429:
+                            wait_time = 3 * (attempt + 1) # Slightly shorter wait for Render
+                            print(f"Rate limit hit (429), retrying in {wait_time}s... ({attempt+1}/{max_retries})")
+                            time.sleep(wait_time)
+                            last_error = "Rate Limited (429)"
+                            continue
+                        
+                        response.raise_for_status()
+                        result = response.json()
+                        reply = result['candidates'][0]['content']['parts'][0]['text']
+                        cache_response(prompt, reply)
+                        used_model = True
+                        break
+                    except Exception as e:
+                        last_error = str(e)
+                        print(f"Attempt {attempt+1} failed: {e}")
+                        if attempt < max_retries - 1:
+                            time.sleep(1)
+                
+                if not reply:
+                    error_detail = f"Last error: {last_error}"
+
         except Exception as e:
-            # Detailed logging for debugging
-            print(f"Gemini API Error (Quota or Other): {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Gemini API Exception: {e}")
+            error_detail = f"Exception: {str(e)}"
             
     # 3. Fallback / Offline Mode
     if not reply:
         if items:
-            # Simple retrieval-based response - Truncate long memories to avoid spamming
+            # Simple retrieval-based response
             memory_preview = items[0].get('content', '')
             if len(memory_preview) > 100:
                 memory_preview = memory_preview[:100] + "..."
-            reply = f"Offline Mode (Memory Retrieval): I recall '{memory_preview}' regarding your message."
+            reply = f"Offline Mode (Memory Retrieval): {memory_preview}"
         else:
             # Echo response
-            reply = f"Offline Mode: I received '{request.message}' but have no specific memories about it yet."
+            reply = f"Offline Mode: I received '{request.message}' but need more context."
         
         if not GEMINI_API_KEY:
-             reply += " (Note: AI API Key not configured)"
+             reply += " (Note: API Key Missing)"
         else:
-             reply += " (Note: AI Service unavailable/Rate Limited)"
+             reply += f" (Note: AI Service busy. {error_detail})"
 
-    # 4. Save Interaction (Even in offline mode, we record the conversation)
+    # 4. Save Interaction
     try:
         await save_resource(ResourceRequest(
             user_id=request.user_id, 
             content=f"User: {request.message}\nAssistant: {reply}"
         ))
-    except Exception as e:
-        print(f"Error saving interaction: {e}")
+    except Exception:
+        pass
 
     return {"reply": reply}
 
