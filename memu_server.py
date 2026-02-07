@@ -25,24 +25,36 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 def generate_gemini_rest(api_key, prompt):
     """Direct REST API call to avoid library issues"""
-    # Switch to gemini-2.0-flash as 1.5-flash is not available in this environment
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    # Using gemini-2.0-flash-lite-001 for better rate limit handling
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-001:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     data = {
         "contents": [{
             "parts": [{"text": prompt}]
         }]
     }
-    try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
-        response.raise_for_status()
-        result = response.json()
-        return result['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e:
-        print(f"REST API Error: {e}")
-        if response.status_code != 200:
-             print(f"Response: {response.text}")
-        raise e
+    
+    import time
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=15)
+            if response.status_code == 429:
+                wait_time = 5 * (attempt + 1)
+                print(f"Rate limit hit (429), retrying in {wait_time} seconds... (Attempt {attempt+1}/{max_retries})")
+                time.sleep(wait_time)
+                continue
+            
+            response.raise_for_status()
+            result = response.json()
+            return result['candidates'][0]['content']['parts'][0]['text']
+        except Exception as e:
+            print(f"REST API Error: {e}")
+            if attempt == max_retries - 1:
+                if 'response' in locals() and hasattr(response, 'status_code') and response.status_code != 200:
+                     print(f"Response: {response.text}")
+                raise e
+            time.sleep(1)
 
 if GEMINI_API_KEY:
     print("✓ Gemini API Key detected (Using REST Mode)")
@@ -243,14 +255,15 @@ Assistant:"""
             print(f"Gemini API Error (Quota or Other): {e}")
             import traceback
             traceback.print_exc()
-            # Fallback will be handled below
-            pass
-
+            
     # 3. Fallback / Offline Mode
     if not reply:
         if items:
-            # Simple retrieval-based response
-            reply = f"I'm in offline memory mode. I recall: {items[0].get('content')}... regarding your message '{request.message}'."
+            # Simple retrieval-based response - Truncate long memories to avoid spamming
+            memory_preview = items[0].get('content', '')
+            if len(memory_preview) > 100:
+                memory_preview = memory_preview[:100] + "..."
+            reply = f"Offline Mode (Memory Retrieval): I recall '{memory_preview}' regarding your message."
         else:
             # Echo response
             reply = f"Offline Mode: I received '{request.message}' but have no specific memories about it yet."
@@ -258,7 +271,7 @@ Assistant:"""
         if not GEMINI_API_KEY:
              reply += " (Note: AI API Key not configured)"
         else:
-             reply += " (Note: AI Service temporarily unavailable)"
+             reply += " (Note: AI Service unavailable/Rate Limited)"
 
     # 4. Save Interaction (Even in offline mode, we record the conversation)
     try:
