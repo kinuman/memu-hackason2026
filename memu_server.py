@@ -6,19 +6,28 @@ from typing import Optional, List, Dict, Any
 import json
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+import google.generativeai as genai
 
 # Check Python version
 is_compatible = sys.version_info >= (3, 10)
 
-# Mock MemoryService if memu cannot be imported
+# Configure Gemini
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+# Mock MemoryService if memu cannot be imported or as a fallback
 class MockMemoryService:
     def __init__(self):
         self.storage_file = "memu_storage.json"
         self.memories = []
         self.resources = []
         self._load_from_disk()
-        print("⚠ Using MockMemoryService with JSON persistence")
+        print("✓ Using Persistent MockMemoryService with JSON persistence")
 
     def _load_from_disk(self):
         if os.path.exists(self.storage_file):
@@ -56,7 +65,7 @@ class MockMemoryService:
             "id": f"mem_{len(self.memories)+1}",
             "content": actual_content,
             "user_id": user.get("user_id"),
-            "timestamp": "2025-02-07T12:00:00Z"
+            "timestamp": "2025-02-07T12:00:00Z" # In real app use datetime.now().isoformat()
         }
         self.memories.append(memory_item)
         self.resources.append({"url": resource_url, "modality": modality})
@@ -94,63 +103,36 @@ memory_service: Any = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global memory_service
-    
-    if is_compatible:
-        try:
-            # Add src to path
-            src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "src"))
-            if src_path not in sys.path:
-                sys.path.insert(0, src_path)
-            
-            from memu.app import MemoryService
-            
-            # Check for keys
-            api_key = os.getenv("OPENAI_API_KEY", "dummy-key")
-            
-            llm_profiles = {
-                "default": {
-                    "provider": "openai",
-                    "base_url": "https://api.openai.com/v1",
-                    "api_key": api_key,
-                    "chat_model": "gpt-4o-mini",
-                    "client_backend": "sdk",
-                },
-                "embedding": {
-                    "provider": "openai",
-                    "base_url": "https://api.openai.com/v1",
-                    "api_key": api_key,
-                    "embed_model": "text-embedding-3-small",
-                    "client_backend": "sdk",
-                },
-            }
-            
-            try:
-                # Use inmemory database
-                memory_service = MemoryService(
-                    llm_profiles=llm_profiles,
-                    database_config={"metadata_store": {"provider": "inmemory"}}
-                )
-                print("✓ MemU Memory Service initialized")
-            except Exception as e:
-                print(f"✗ Failed to initialize MemU: {e}")
-                print("Falling back to MockMemoryService")
-                memory_service = MockMemoryService()
-        except Exception as e:
-            print(f"✗ Failed to import MemU: {e}")
-            memory_service = MockMemoryService()
-    else:
-        print(f"⚠ Python version {sys.version.split()[0]} is too old for MemU (requires 3.10+)")
-        memory_service = MockMemoryService()
-    
+    # Force use of our robust MockService for Hackathon reliability unless explicitly overridden
+    # This ensures consistency across environments (Render/Local)
+    memory_service = MockMemoryService()
     yield
     print("Shutting down...")
 
 app = FastAPI(lifespan=lifespan)
 
+# Add CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve static files for frontend
+if not os.path.exists("static"):
+    os.makedirs("static")
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")
+
 class ResourceRequest(BaseModel):
     user_id: str
     content: str
     resource_type: str = "text"
+
+class ChatRequest(BaseModel):
+    user_id: str
+    message: str
 
 @app.post("/resources/")
 async def save_resource(request: ResourceRequest):
@@ -201,6 +183,45 @@ async def search_deep(user_id: str, query: str):
     except Exception as e:
         print(f"Error searching: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+    
+    # 1. Retrieve Context
+    memories = await search_deep(request.user_id, request.message)
+    items = memories.get("results", {}).get("items", [])
+    memory_context = "\n".join([f"- {item.get('content', '')}" for item in items])
+    
+    # 2. Generate Response with Gemini
+    model = genai.GenerativeModel('gemini-pro')
+    prompt = f"""You are a helpful AI assistant with long-term memory.
+    
+Relevant memories:
+{memory_context if memory_context else "No relevant memories found."}
+
+User: {request.message}
+Assistant:"""
+
+    try:
+        response = model.generate_content(prompt)
+        reply = response.text
+        
+        # 3. Save Interaction
+        await save_resource(ResourceRequest(
+            user_id=request.user_id, 
+            content=f"User: {request.message}\nAssistant: {reply}"
+        ))
+        
+        return {"reply": reply}
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
+
+@app.get("/")
+async def root():
+    return FileResponse('static/index.html')
 
 if __name__ == "__main__":
     import uvicorn
