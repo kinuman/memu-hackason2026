@@ -121,9 +121,11 @@ app.add_middleware(
 )
 
 # Serve static files for frontend
-if not os.path.exists("static"):
-    os.makedirs("static")
-app.mount("/static", StaticFiles(directory="static", html=True), name="static")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+if not os.path.exists(STATIC_DIR):
+    os.makedirs(STATIC_DIR)
+app.mount("/static", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 class ResourceRequest(BaseModel):
     user_id: str
@@ -238,9 +240,13 @@ Assistant:"""
 
     return {"reply": reply}
 
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": "1.0.1"}
+
 @app.get("/")
 async def root():
-    return FileResponse('static/index.html')
+    return FileResponse(os.path.join(STATIC_DIR, 'index.html'))
 
 if __name__ == "__main__":
     import uvicorn
