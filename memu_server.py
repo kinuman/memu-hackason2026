@@ -186,38 +186,57 @@ async def search_deep(user_id: str, query: str):
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
-    
-    # 1. Retrieve Context
+    # 1. Retrieve Context (Always perform retrieval first)
     memories = await search_deep(request.user_id, request.message)
     items = memories.get("results", {}).get("items", [])
     memory_context = "\n".join([f"- {item.get('content', '')}" for item in items])
     
-    # 2. Generate Response with Gemini
-    model = genai.GenerativeModel('gemini-pro')
-    prompt = f"""You are a helpful AI assistant with long-term memory.
+    # 2. Try Generating Response with Gemini
+    reply = ""
+    used_model = False
     
+    if GEMINI_API_KEY:
+        try:
+            model = genai.GenerativeModel('gemini-pro')
+            prompt = f"""You are a helpful AI assistant with long-term memory.
+            
 Relevant memories:
 {memory_context if memory_context else "No relevant memories found."}
 
 User: {request.message}
 Assistant:"""
+            response = model.generate_content(prompt)
+            reply = response.text
+            used_model = True
+        except Exception as e:
+            print(f"Gemini API Error (Quota or Other): {e}")
+            # Fallback will be handled below
+            pass
 
-    try:
-        response = model.generate_content(prompt)
-        reply = response.text
+    # 3. Fallback / Offline Mode
+    if not reply:
+        if items:
+            # Simple retrieval-based response
+            reply = f"I'm in offline memory mode. I recall: {items[0].get('content')}... regarding your message '{request.message}'."
+        else:
+            # Echo response
+            reply = f"Offline Mode: I received '{request.message}' but have no specific memories about it yet."
         
-        # 3. Save Interaction
+        if not GEMINI_API_KEY:
+             reply += " (Note: AI API Key not configured)"
+        else:
+             reply += " (Note: AI Service temporarily unavailable)"
+
+    # 4. Save Interaction (Even in offline mode, we record the conversation)
+    try:
         await save_resource(ResourceRequest(
             user_id=request.user_id, 
             content=f"User: {request.message}\nAssistant: {reply}"
         ))
-        
-        return {"reply": reply}
     except Exception as e:
-        print(f"Gemini Error: {e}")
-        raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
+        print(f"Error saving interaction: {e}")
+
+    return {"reply": reply}
 
 @app.get("/")
 async def root():
