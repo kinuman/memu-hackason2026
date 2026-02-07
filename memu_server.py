@@ -227,6 +227,18 @@ async def search_deep(user_id: str, query: str):
         print(f"Error searching: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- In-Memory Cache for Hackathon Demo ---
+response_cache = {}
+
+def get_cached_response(prompt):
+    return response_cache.get(prompt)
+
+def cache_response(prompt, response):
+    # Simple LRU-like behavior: limit cache size
+    if len(response_cache) > 100:
+        response_cache.pop(next(iter(response_cache)))
+    response_cache[prompt] = response
+
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     # 1. Retrieve Context (Always perform retrieval first)
@@ -242,14 +254,23 @@ async def chat_endpoint(request: ChatRequest):
         try:
             prompt = f"""You are a helpful AI assistant with long-term memory.
             
-Relevant memories:
-{memory_context if memory_context else "No relevant memories found."}
-
-User: {request.message}
-Assistant:"""
-            # Use direct REST call instead of SDK
-            reply = generate_gemini_rest(GEMINI_API_KEY, prompt)
-            used_model = True
+            Relevant memories:
+            {memory_context if memory_context else "No relevant memories found."}
+            
+            User: {request.message}
+            Assistant:"""
+            
+            # Check Cache First
+            cached = get_cached_response(prompt)
+            if cached:
+                print("✓ Cache Hit! Returning cached response.")
+                reply = cached + " (Cached)"
+                used_model = True
+            else:
+                # Use direct REST call instead of SDK
+                reply = generate_gemini_rest(GEMINI_API_KEY, prompt)
+                cache_response(prompt, reply)
+                used_model = True
         except Exception as e:
             # Detailed logging for debugging
             print(f"Gemini API Error (Quota or Other): {e}")
