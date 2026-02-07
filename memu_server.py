@@ -4,6 +4,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 import json
+import requests
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -14,19 +15,36 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import google.generativeai as genai
+# import google.generativeai as genai  <-- Removed to avoid dependency hell
 
 # Check Python version
 is_compatible = sys.version_info >= (3, 10)
 
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
+
+def generate_gemini_rest(api_key, prompt):
+    """Direct REST API call to avoid library issues"""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        print("✓ Gemini API configured successfully")
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        result = response.json()
+        return result['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
-        print(f"✗ Failed to configure Gemini API: {e}")
+        print(f"REST API Error: {e}")
+        if response.status_code != 200:
+             print(f"Response: {response.text}")
+        raise e
+
+if GEMINI_API_KEY:
+    print("✓ Gemini API Key detected (Using REST Mode)")
 else:
     print("⚠ GEMINI_API_KEY not found in environment variables")
 
@@ -203,14 +221,12 @@ async def chat_endpoint(request: ChatRequest):
     items = memories.get("results", {}).get("items", [])
     memory_context = "\n".join([f"- {item.get('content', '')}" for item in items])
     
-    # 2. Try Generating Response with Gemini
+    # 2. Try Generating Response with Gemini (REST API)
     reply = ""
     used_model = False
     
     if GEMINI_API_KEY:
         try:
-            # Use the newer, faster, and more stable model
-            model = genai.GenerativeModel('gemini-1.5-flash')
             prompt = f"""You are a helpful AI assistant with long-term memory.
             
 Relevant memories:
@@ -218,8 +234,8 @@ Relevant memories:
 
 User: {request.message}
 Assistant:"""
-            response = model.generate_content(prompt)
-            reply = response.text
+            # Use direct REST call instead of SDK
+            reply = generate_gemini_rest(GEMINI_API_KEY, prompt)
             used_model = True
         except Exception as e:
             # Detailed logging for debugging
