@@ -169,8 +169,8 @@ async def lifespan(app: FastAPI):
                     "default": {
                         "provider": "gemini",
                         "api_key": api_key,
-                        "chat_model": "gemini-flash-latest",
-                        "embed_model": "gemini-embedding-001",
+                        "chat_model": "gemini-1.5-flash",
+                        "embed_model": "text-embedding-004",
                         "base_url": "https://generativelanguage.googleapis.com/v1beta",
                         "client_backend": "httpx"
                     }
@@ -310,9 +310,9 @@ async def chat_endpoint(request: ChatRequest):
                 reply = cached + " (Cached)"
                 used_model = True
             else:
-                # Switching to gemini-flash-latest for potentially better stability
+                # Switching to gemini-1.5-flash for potentially better stability
                 # Direct REST call using v1beta endpoint
-                model_name = "gemini-flash-latest"
+                model_name = "gemini-1.5-flash"
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
                 headers = {'Content-Type': 'application/json'}
                 data = {
