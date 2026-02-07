@@ -209,7 +209,8 @@ async def chat_endpoint(request: ChatRequest):
     
     if GEMINI_API_KEY:
         try:
-            model = genai.GenerativeModel('gemini-pro')
+            # Use the newer, faster, and more stable model
+            model = genai.GenerativeModel('gemini-1.5-flash')
             prompt = f"""You are a helpful AI assistant with long-term memory.
             
 Relevant memories:
@@ -221,7 +222,10 @@ Assistant:"""
             reply = response.text
             used_model = True
         except Exception as e:
+            # Detailed logging for debugging
             print(f"Gemini API Error (Quota or Other): {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback will be handled below
             pass
 
