@@ -20,8 +20,9 @@ from pydantic import BaseModel
 # Check Python version
 is_compatible = sys.version_info >= (3, 10)
 
-# Configure Gemini
+# Configure API Keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+FORGE_API_KEY = os.getenv("BUILT_IN_FORGE_API_KEY") or os.getenv("VITE_FRONTEND_FORGE_API_KEY")
 
 def generate_gemini_rest(api_key, prompt):
     """Direct REST API call to avoid library issues"""
@@ -57,9 +58,14 @@ def generate_gemini_rest(api_key, prompt):
             time.sleep(1)
 
 if GEMINI_API_KEY:
-    print("✓ Gemini API Key detected (Using REST Mode)")
+    print(f"✓ Gemini API Key detected: {GEMINI_API_KEY[:10]}... (Using REST Mode)")
 else:
     print("⚠ GEMINI_API_KEY not found in environment variables")
+
+if FORGE_API_KEY:
+    print(f"✓ Forge API Key detected: {FORGE_API_KEY[:10]}...")
+else:
+    print("⚠ Forge API Key not found (Optional)")
 
 # Mock MemoryService if memu cannot be imported or as a fallback
 class MockMemoryService:
