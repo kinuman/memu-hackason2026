@@ -7,6 +7,13 @@ import json
 import requests
 from dotenv import load_dotenv
 
+# Add src to sys.path
+src_path = os.path.abspath("src")
+sys.path.insert(0, src_path)
+
+from memu.app import MemoryService
+
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -27,7 +34,7 @@ FORGE_API_KEY = os.getenv("BUILT_IN_FORGE_API_KEY") or os.getenv("VITE_FRONTEND_
 def generate_gemini_rest(api_key, prompt):
     """Direct REST API call to avoid library issues"""
     # Using gemini-2.0-flash-lite-001 for better rate limit handling
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-001:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     data = {
         "contents": [{
@@ -150,9 +157,38 @@ memory_service: Any = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global memory_service
-    # Force use of our robust MockService for Hackathon reliability unless explicitly overridden
-    # This ensures consistency across environments (Render/Local)
-    memory_service = MockMemoryService()
+    
+    # Try to use real MemoryService if API key is available
+    if GEMINI_API_KEY or os.getenv("REACT_APP_API_KEY"):
+        api_key = GEMINI_API_KEY or os.getenv("REACT_APP_API_KEY")
+        print(f"✓ Initializing MemU with Gemini... (Key: {api_key[:5]}...)")
+        try:
+            # Configure MemoryService with Gemini
+            memory_service = MemoryService(
+                llm_profiles={
+                    "default": {
+                        "provider": "gemini",
+                        "api_key": api_key,
+                        "chat_model": "gemini-flash-latest",
+                        "embed_model": "gemini-embedding-001",
+                        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                        "client_backend": "httpx"
+                    }
+                },
+                memorize_config={"memory_categories": []},
+                retrieve_config={"method": "llm"} # Use LLM-based retrieval/ranking to avoid embedding issues if any
+            )
+            # Force context ready
+            memory_service._context.categories_ready = True
+        except Exception as e:
+            print(f"Error initializing MemU: {e}")
+            import traceback
+            traceback.print_exc()
+            memory_service = MockMemoryService()
+    else:
+        print("⚠ No API Key found. Using MockMemoryService.")
+        memory_service = MockMemoryService()
+
     yield
     print("Shutting down...")
 
@@ -274,9 +310,9 @@ async def chat_endpoint(request: ChatRequest):
                 reply = cached + " (Cached)"
                 used_model = True
             else:
-                # Switching to gemini-2.0-flash for potentially better stability
+                # Switching to gemini-flash-latest for potentially better stability
                 # Direct REST call using v1beta endpoint
-                model_name = "gemini-2.0-flash"
+                model_name = "gemini-flash-latest"
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
                 headers = {'Content-Type': 'application/json'}
                 data = {
@@ -317,31 +353,36 @@ async def chat_endpoint(request: ChatRequest):
             print(f"Gemini API Exception: {e}")
             error_detail = f"Exception: {str(e)}"
             
-    # 3. Fallback / Offline Mode
+    # Fallback response
     if not reply:
-        if items:
-            # Simple retrieval-based response
-            memory_preview = items[0].get('content', '')
-            if len(memory_preview) > 100:
-                memory_preview = memory_preview[:100] + "..."
-            reply = f"Offline Mode (Memory Retrieval): {memory_preview}"
-        else:
-            # Echo response
-            reply = f"Offline Mode: I received '{request.message}' but need more context."
-        
+        reply = f"Sorry, I couldn't generate a response at the moment. (Error: {error_detail})"
         if not GEMINI_API_KEY:
-             reply += " (Note: API Key Missing)"
-        else:
-             reply += f" (Note: AI Service busy. {error_detail})"
+            reply = "Please configure GEMINI_API_KEY in .env file to enable AI responses."
 
-    # 4. Save Interaction
-    try:
-        await save_resource(ResourceRequest(
-            user_id=request.user_id, 
-            content=f"User: {request.message}\nAssistant: {reply}"
-        ))
-    except Exception:
-        pass
+    # 3. Memorize the interaction
+    if reply and memory_service and used_model:
+        try:
+            # Create a temp file for the conversation
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
+                json.dump([
+                    {"role": "user", "content": request.message, "name": request.user_id},
+                    {"role": "assistant", "content": reply, "name": "Assistant"}
+                ], f, ensure_ascii=False)
+                temp_file = f.name
+            
+            try:
+                # Memorize the conversation
+                await memory_service.memorize(
+                    resource_url=temp_file,
+                    modality="conversation",
+                    user={"user_id": request.user_id}
+                )
+                print(f"✓ Memorized interaction for user {request.user_id}")
+            finally:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+        except Exception as e:
+             print(f"Error memorizing interaction: {e}")
 
     return {"reply": reply}
 

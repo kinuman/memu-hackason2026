@@ -3,14 +3,14 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     from memu.workflow.interceptor import WorkflowInterceptorRegistry
 
 WorkflowState = dict[str, Any]
-WorkflowContext = Mapping[str, Any] | None
-WorkflowHandler = Callable[[WorkflowState, WorkflowContext], Awaitable[WorkflowState] | WorkflowState]
+WorkflowContext = Optional[Mapping[str, Any]]
+WorkflowHandler = Callable[[WorkflowState, WorkflowContext], Union[Awaitable[WorkflowState], WorkflowState]]
 
 
 @dataclass
@@ -52,7 +52,7 @@ async def run_steps(
     steps: list[WorkflowStep],
     initial_state: WorkflowState,
     context: WorkflowContext = None,
-    interceptor_registry: WorkflowInterceptorRegistry | None = None,
+    interceptor_registry: Optional[WorkflowInterceptorRegistry] = None,
 ) -> WorkflowState:
     from memu.workflow.interceptor import (
         WorkflowStepContext,

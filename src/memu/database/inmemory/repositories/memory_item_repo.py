@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from typing import Any, override
+from typing import Any
 
 import pendulum
 
@@ -215,12 +215,10 @@ class InMemoryMemoryItemRepository(MemoryItemRepo):
                 return parsed
             return None
 
-    @override
     def delete_item(self, item_id: str) -> None:
         if item_id in self.items:
             del self.items[item_id]
 
-    @override
     def update_item(
         self,
         *,

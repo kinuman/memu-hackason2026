@@ -1,5 +1,6 @@
+from __future__ import annotations
 from collections.abc import Mapping
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, RootModel, StringConstraints, model_validator
 
@@ -31,20 +32,20 @@ def _default_memory_types() -> list[str]:
     return list(DEFAULT_MEMORY_TYPES)
 
 
-def _default_memory_type_prompts() -> "dict[str, str | CustomPrompt]":
+def _default_memory_type_prompts() -> "dict[str, Union[str, CustomPrompt]]":
     return dict(DEFAULT_MEMORY_TYPE_PROMPTS)
 
 
 class PromptBlock(BaseModel):
-    label: str | None = None
+    label: Optional[str] = None
     ordinal: int = Field(default=0)
-    prompt: str | None = None
+    prompt: Optional[str] = None
 
 
 class CustomPrompt(RootModel[dict[str, PromptBlock]]):
     root: dict[str, PromptBlock] = Field(default_factory=dict)
 
-    def get(self, key: str, default: PromptBlock | None = None) -> PromptBlock | None:
+    def get(self, key: str, default: Optional[PromptBlock] = None) -> Optional[PromptBlock]:
         return self.root.get(key, default)
 
     def items(self) -> list[tuple[str, PromptBlock]]:
@@ -67,8 +68,8 @@ CompleteCategoryPrompt = AfterValidator(lambda v: complete_prompt_blocks(v, DEFA
 class CategoryConfig(BaseModel):
     name: str
     description: str = ""
-    target_length: int | None = None
-    summary_prompt: str | Annotated[CustomPrompt, CompleteCategoryPrompt] | None = None
+    target_length: Optional[int] = None
+    summary_prompt: Optional[Union[str, Annotated[CustomPrompt, CompleteCategoryPrompt]]] = None
 
 
 def _default_memory_categories() -> list[CategoryConfig]:
@@ -90,11 +91,11 @@ def _default_memory_categories() -> list[CategoryConfig]:
 
 
 class LazyLLMSource(BaseModel):
-    source: str | None = Field(default=None, description="default source for lazyllm client backend")
-    llm_source: str | None = Field(default=None, description="LLM source for lazyllm client backend")
-    embed_source: str | None = Field(default=None, description="Embedding source for lazyllm client backend")
-    vlm_source: str | None = Field(default=None, description="VLM source for lazyllm client backend")
-    stt_source: str | None = Field(default=None, description="STT source for lazyllm client backend")
+    source: Optional[str] = Field(default=None, description="default source for lazyllm client backend")
+    llm_source: Optional[str] = Field(default=None, description="LLM source for lazyllm client backend")
+    embed_source: Optional[str] = Field(default=None, description="Embedding source for lazyllm client backend")
+    vlm_source: Optional[str] = Field(default=None, description="VLM source for lazyllm client backend")
+    stt_source: Optional[str] = Field(default=None, description="STT source for lazyllm client backend")
     vlm_model: str = Field(default="qwen-vl-plus", description="Vision language model for lazyllm client backend")
     stt_model: str = Field(default="qwen-audio-turbo", description="Speech-to-text model for lazyllm client backend")
 
@@ -203,7 +204,7 @@ class RetrieveConfig(BaseModel):
 
 class MemorizeConfig(BaseModel):
     category_assign_threshold: float = Field(default=0.25)
-    multimodal_preprocess_prompts: dict[str, str | CustomPrompt] = Field(
+    multimodal_preprocess_prompts: dict[str, Union[str, CustomPrompt]] = Field(
         default_factory=dict,
         description="Optional mapping of modality -> preprocess system prompt.",
     )
@@ -212,7 +213,7 @@ class MemorizeConfig(BaseModel):
         default_factory=_default_memory_types,
         description="Ordered list of memory types (profile/event/knowledge/behavior by default).",
     )
-    memory_type_prompts: dict[str, str | Annotated[CustomPrompt, CompleteMemoryTypePrompt]] = Field(
+    memory_type_prompts: dict[str, Union[str, Annotated[CustomPrompt, CompleteMemoryTypePrompt]]] = Field(
         default_factory=_default_memory_type_prompts,
         description="User prompt overrides for each memory type extraction.",
     )
@@ -222,7 +223,7 @@ class MemorizeConfig(BaseModel):
         description="Global memory category definitions embedded at service startup.",
     )
     # default_category_summary_prompt: str | CustomPrompt = Field(
-    default_category_summary_prompt: str | Annotated[CustomPrompt, CompleteCategoryPrompt] = Field(
+    default_category_summary_prompt: Union[str, Annotated[CustomPrompt, CompleteCategoryPrompt]] = Field(
         default=CATEGORY_SUMMARY_PROMPT,
         description="Default system prompt for auto-generated category summaries.",
     )
@@ -247,7 +248,7 @@ class PatchConfig(BaseModel):
 
 
 class DefaultUserModel(BaseModel):
-    user_id: str | None = None
+    user_id: Optional[str] = None
     # Agent/session scoping for multi-agent and multi-session memory filtering
     # agent_id: str | None = None
     # session_id: str | None = None
@@ -263,7 +264,7 @@ Key = Annotated[str, StringConstraints(min_length=1)]
 class LLMProfilesConfig(RootModel[dict[Key, LLMConfig]]):
     root: dict[str, LLMConfig] = Field(default_factory=lambda: {"default": LLMConfig()})
 
-    def get(self, key: str, default: LLMConfig | None = None) -> LLMConfig | None:
+    def get(self, key: str, default: Optional[LLMConfig] = None) -> Optional[LLMConfig]:
         return self.root.get(key, default)
 
     @model_validator(mode="before")
@@ -299,17 +300,17 @@ class LLMProfilesConfig(RootModel[dict[Key, LLMConfig]]):
 class MetadataStoreConfig(BaseModel):
     provider: Annotated[Literal["inmemory", "postgres", "sqlite"], Normalize] = "inmemory"
     ddl_mode: Annotated[Literal["create", "validate"], Normalize] = "create"
-    dsn: str | None = Field(default=None, description="Database connection string (required for postgres/sqlite).")
+    dsn: Optional[str] = Field(default=None, description="Database connection string (required for postgres/sqlite).")
 
 
 class VectorIndexConfig(BaseModel):
     provider: Annotated[Literal["bruteforce", "pgvector", "none"], Normalize] = "bruteforce"
-    dsn: str | None = Field(default=None, description="Postgres connection string when provider=pgvector.")
+    dsn: Optional[str] = Field(default=None, description="Postgres connection string when provider=pgvector.")
 
 
 class DatabaseConfig(BaseModel):
     metadata_store: MetadataStoreConfig = Field(default_factory=MetadataStoreConfig)
-    vector_index: VectorIndexConfig | None = Field(default=None)
+    vector_index: Optional[VectorIndexConfig] = Field(default=None)
 
     def model_post_init(self, __context: Any) -> None:
         if self.vector_index is None:

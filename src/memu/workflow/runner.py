@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Optional, Protocol, Union, runtime_checkable
 
 from memu.workflow.step import WorkflowContext, WorkflowState, WorkflowStep, run_steps
 
@@ -21,7 +21,7 @@ class WorkflowRunner(Protocol):
         steps: list[WorkflowStep],
         initial_state: WorkflowState,
         context: WorkflowContext = None,
-        interceptor_registry: WorkflowInterceptorRegistry | None = None,
+        interceptor_registry: Optional[WorkflowInterceptorRegistry] = None,
     ) -> WorkflowState: ...
 
 
@@ -34,13 +34,13 @@ class LocalWorkflowRunner:
         steps: list[WorkflowStep],
         initial_state: WorkflowState,
         context: WorkflowContext = None,
-        interceptor_registry: WorkflowInterceptorRegistry | None = None,
+        interceptor_registry: Optional[WorkflowInterceptorRegistry] = None,
     ) -> WorkflowState:
         return await run_steps(workflow_name, steps, initial_state, context, interceptor_registry)
 
 
 RunnerFactory = Callable[[], WorkflowRunner]
-WorkflowRunnerSpec = WorkflowRunner | str | None
+WorkflowRunnerSpec = Union[WorkflowRunner, str, None]
 
 
 _RUNNER_FACTORIES: dict[str, RunnerFactory] = {

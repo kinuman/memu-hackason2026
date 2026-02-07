@@ -8,26 +8,15 @@ from typing import Any, cast
 
 import httpx
 
-from memu.llm.backends.base import LLMBackend
+from memu.llm.backends.base import EmbeddingBackend, LLMBackend
 from memu.llm.backends.doubao import DoubaoLLMBackend
+from memu.llm.backends.gemini import GeminiEmbeddingBackend, GeminiLLMBackend
 from memu.llm.backends.grok import GrokBackend
 from memu.llm.backends.openai import OpenAILLMBackend
 from memu.llm.backends.openrouter import OpenRouterLLMBackend
 
 
-# Minimal embedding backend support (moved from embedding module)
-class _EmbeddingBackend:
-    name: str
-    embedding_endpoint: str
-
-    def build_embedding_payload(self, *, inputs: list[str], embed_model: str) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def parse_embedding_response(self, data: dict[str, Any]) -> list[list[float]]:
-        raise NotImplementedError
-
-
-class _OpenAIEmbeddingBackend(_EmbeddingBackend):
+class _OpenAIEmbeddingBackend(EmbeddingBackend):
     name = "openai"
     embedding_endpoint = "/embeddings"
 
@@ -38,7 +27,7 @@ class _OpenAIEmbeddingBackend(_EmbeddingBackend):
         return [cast(list[float], d["embedding"]) for d in data["data"]]
 
 
-class _DoubaoEmbeddingBackend(_EmbeddingBackend):
+class _DoubaoEmbeddingBackend(EmbeddingBackend):
     name = "doubao"
     embedding_endpoint = "/api/v3/embeddings"
 
@@ -49,7 +38,7 @@ class _DoubaoEmbeddingBackend(_EmbeddingBackend):
         return [cast(list[float], d["embedding"]) for d in data["data"]]
 
 
-class _OpenRouterEmbeddingBackend(_EmbeddingBackend):
+class _OpenRouterEmbeddingBackend(EmbeddingBackend):
     """OpenRouter uses OpenAI-compatible embedding API."""
 
     name = "openrouter"
@@ -67,6 +56,7 @@ logger = logging.getLogger(__name__)
 LLM_BACKENDS: dict[str, Callable[[], LLMBackend]] = {
     OpenAILLMBackend.name: OpenAILLMBackend,
     DoubaoLLMBackend.name: DoubaoLLMBackend,
+    GeminiLLMBackend.name: GeminiLLMBackend,
     GrokBackend.name: GrokBackend,
     OpenRouterLLMBackend.name: OpenRouterLLMBackend,
 }
@@ -89,44 +79,48 @@ class HTTPLLMClient:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or ""
         self.chat_model = chat_model
+        self.embed_model = embed_model or chat_model
         self.provider = provider.lower()
         self.backend = self._load_backend(self.provider)
         self.embedding_backend = self._load_embedding_backend(self.provider)
         overrides = endpoint_overrides or {}
         self.summary_endpoint = overrides.get("chat") or overrides.get("summary") or self.backend.summary_endpoint
+        
         self.embedding_endpoint = (
             overrides.get("embeddings")
             or overrides.get("embedding")
             or overrides.get("embed")
             or self.embedding_backend.embedding_endpoint
         )
+        
+        if self.provider == "gemini":
+            if not (overrides.get("chat") or overrides.get("summary")):
+                self.summary_endpoint = f"/models/{self.chat_model}:generateContent"
+            if not (overrides.get("embeddings") or overrides.get("embedding") or overrides.get("embed")):
+                self.embedding_endpoint = f"/models/{self.embed_model}:batchEmbedContents"
+
         self.timeout = timeout
-        self.embed_model = embed_model or chat_model
 
     async def chat(
         self,
         prompt: str,
-        *,
-        max_tokens: int | None = None,
         system_prompt: str | None = None,
+        max_tokens: int | None = None,
         temperature: float = 0.2,
     ) -> tuple[str, dict[str, Any]]:
         """Generic chat completion."""
-        messages: list[dict[str, Any]] = []
-        if system_prompt is not None:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        payload: dict[str, Any] = {
-            "model": self.chat_model,
-            "messages": messages,
-            "temperature": temperature,
-        }
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
+        payload = self.backend.build_chat_payload(
+            text=prompt,
+            system_prompt=system_prompt,
+            chat_model=self.chat_model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
 
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
             resp = await client.post(self.summary_endpoint, json=payload, headers=self._headers())
+            if resp.is_error:
+                logger.error("HTTP LLM chat error: %s", resp.text)
             resp.raise_for_status()
             data = resp.json()
         logger.debug("HTTP LLM chat response: %s", data)
@@ -200,6 +194,8 @@ class HTTPLLMClient:
         payload = self.embedding_backend.build_embedding_payload(inputs=inputs, embed_model=self.embed_model)
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
             resp = await client.post(self.embedding_endpoint, json=payload, headers=self._headers())
+            if resp.is_error:
+                logger.error("HTTP embedding error: %s", resp.text)
             resp.raise_for_status()
             data = resp.json()
         logger.debug("HTTP embedding response: %s", data)
@@ -262,6 +258,8 @@ class HTTPLLMClient:
             return result or "", raw_response
 
     def _headers(self) -> dict[str, str]:
+        if self.provider == "gemini":
+            return {"x-goog-api-key": self.api_key}
         return {"Authorization": f"Bearer {self.api_key}"}
 
     def _load_backend(self, provider: str) -> LLMBackend:
@@ -271,10 +269,11 @@ class HTTPLLMClient:
             raise ValueError(msg)
         return factory()
 
-    def _load_embedding_backend(self, provider: str) -> _EmbeddingBackend:
-        backends: dict[str, type[_EmbeddingBackend]] = {
+    def _load_embedding_backend(self, provider: str) -> EmbeddingBackend:
+        backends: dict[str, type[EmbeddingBackend]] = {
             _OpenAIEmbeddingBackend.name: _OpenAIEmbeddingBackend,
             _DoubaoEmbeddingBackend.name: _DoubaoEmbeddingBackend,
+            GeminiEmbeddingBackend.name: GeminiEmbeddingBackend,
             "grok": _OpenAIEmbeddingBackend,
             _OpenRouterEmbeddingBackend.name: _OpenRouterEmbeddingBackend,
         }

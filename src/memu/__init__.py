@@ -1,5 +1,6 @@
-from memu._core import hello_from_bin
+# from memu._core import hello_from_bin
 
 
 def _rust_entry() -> str:
-    return hello_from_bin()
+    # return hello_from_bin()
+    return "mock_rust_entry"

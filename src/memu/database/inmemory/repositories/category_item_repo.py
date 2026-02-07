@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from typing import Any, override
+from typing import Any
 
 from memu.database.inmemory.repositories.filter import matches_where
 from memu.database.inmemory.state import InMemoryState
@@ -33,11 +33,9 @@ class InMemoryCategoryItemRepository(CategoryItemRepo):
     def load_existing(self) -> None:
         return None
 
-    @override
     def get_item_categories(self, item_id: str) -> list[CategoryItem]:
         return [rel for rel in self.relations if rel.item_id == item_id]
 
-    @override
     def unlink_item_category(self, item_id: str, cat_id: str) -> None:
         self.relations = [rel for rel in self.relations if not (rel.item_id == item_id and rel.category_id == cat_id)]
 

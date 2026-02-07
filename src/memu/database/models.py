@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Optional, TypeVar, Union
 
 import pendulum
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,7 +44,7 @@ class ToolCallResult(BaseModel):
     """Represents the result of a tool invocation for Tool Memory."""
 
     tool_name: str = Field(..., description="Name of the tool that was called")
-    input: dict[str, Any] | str = Field(default="", description="Tool input parameters")
+    input: Union[dict[str, Any], str] = Field(default="", description="Tool input parameters")
     output: str = Field(default="", description="Tool output result")
     success: bool = Field(default=True, description="Whether the tool invocation succeeded")
     time_cost: float = Field(default=0.0, description="Time consumed by the tool invocation in seconds")
@@ -69,16 +69,16 @@ class Resource(BaseRecord):
     url: str
     modality: str
     local_path: str
-    caption: str | None = None
-    embedding: list[float] | None = None
+    caption: Optional[str] = None
+    embedding: Optional[list[float]] = None
 
 
 class MemoryItem(BaseRecord):
-    resource_id: str | None
+    resource_id: Optional[str]
     memory_type: str
     summary: str
-    embedding: list[float] | None = None
-    happened_at: datetime | None = None
+    embedding: Optional[list[float]] = None
+    happened_at: Optional[datetime] = None
     extra: dict[str, Any] = {}
     # extra may contain:
     # # reinforcement tracking fields
@@ -96,8 +96,8 @@ class MemoryItem(BaseRecord):
 class MemoryCategory(BaseRecord):
     name: str
     description: str
-    embedding: list[float] | None = None
-    summary: str | None = None
+    embedding: Optional[list[float]] = None
+    summary: Optional[str] = None
 
 
 class CategoryItem(BaseRecord):
@@ -105,7 +105,10 @@ class CategoryItem(BaseRecord):
     category_id: str
 
 
-def merge_scope_model[TBaseRecord: BaseRecord](
+TBaseRecord = TypeVar("TBaseRecord", bound=BaseRecord)
+
+
+def merge_scope_model(
     user_model: type[BaseModel], core_model: type[TBaseRecord], *, name_suffix: str
 ) -> type[TBaseRecord]:
     """Create a scoped model inheriting both the user scope model and the core model."""

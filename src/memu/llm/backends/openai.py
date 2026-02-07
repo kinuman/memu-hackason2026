@@ -25,6 +25,21 @@ class OpenAILLMBackend(LLMBackend):
             "max_tokens": max_tokens,
         }
 
+    def build_chat_payload(
+        self, *, text: str, system_prompt: str | None, chat_model: str, max_tokens: int | None, temperature: float
+    ) -> dict[str, Any]:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": text})
+        
+        return {
+            "model": chat_model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
     def parse_summary_response(self, data: dict[str, Any]) -> str:
         return cast(str, data["choices"][0]["message"]["content"])
 

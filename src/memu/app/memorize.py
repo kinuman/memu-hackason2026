@@ -6,7 +6,7 @@ import logging
 import pathlib
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, Optional
 from xml.etree.ElementTree import Element
 
 import defusedxml.ElementTree as ET
@@ -88,7 +88,7 @@ class MemorizeMixin:
         }
 
         result = await self._run_workflow("memorize", state)
-        response = cast(dict[str, Any] | None, result.get("response"))
+        response = cast(Optional[dict[str, Any]], result.get("response"))
         if response is None:
             msg = "Memorize workflow failed to produce a response"
             raise RuntimeError(msg)
@@ -537,7 +537,7 @@ class MemorizeMixin:
         self, memory_types: list[MemoryType], responses: Sequence[str]
     ) -> list[tuple[MemoryType, str, list[str]]]:
         entries: list[tuple[MemoryType, str, list[str]]] = []
-        for mtype, response in zip(memory_types, responses, strict=True):
+        for mtype, response in zip(memory_types, responses):
             parsed = self._parse_memory_type_response_xml(response)
             # if not parsed:
             #     fallback_entry = response.strip()
@@ -601,7 +601,7 @@ class MemorizeMixin:
         category_memory_updates: dict[str, list[tuple[str, str]]] = {}
 
         reinforce = self.memorize_config.enable_item_reinforcement
-        for (memory_type, summary_text, cat_names), emb in zip(structured_entries, item_embeddings, strict=True):
+        for (memory_type, summary_text, cat_names), emb in zip(structured_entries, item_embeddings):
             item = store.memory_item_repo.create_item(
                 resource_id=resource_id,
                 memory_type=memory_type,
